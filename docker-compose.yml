@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: serp_postgres
+    environment:
+      POSTGRES_DB: serp_collector
+      POSTGRES_USER: serp_user
+      POSTGRES_PASSWORD: serp_pass
+      POSTGRES_INITDB_ARGS: "-E UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    # Removed external port exposure for security
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U serp_user -d serp_collector"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    networks:
+      - serp_network
+
+  api:
+    build: 
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: serp_api
+    environment:
+      DB_HOST: postgres
+      DB_NAME: serp_collector
+      DB_USER: serp_user
+      DB_PASS: serp_pass
+      DB_PORT: 5432
+      PORT: 3000
+      API_KEY: your_secure_api_key_here
+      NODE_ENV: production
+      # Trust proxy headers from nginx
+      TRUST_PROXY: true
+    # Expose port only to localhost for nginx
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/health', (r) => r.statusCode === 200 ? process.exit(0) : process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - serp_network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  serp_network:
+    driver: bridge
+    internal: false
